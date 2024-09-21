@@ -1,0 +1,8 @@
+flask
+yt-dlp
+ffmpeg-python
+nltk
+scikit-learn
+transformers
+vosk
+python-dotenv

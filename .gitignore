@@ -1,3 +1,10 @@
-node_modules
 .env
 vosk/models/*
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.venv/
+# Outros
+*.wav
