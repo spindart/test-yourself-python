@@ -11,6 +11,7 @@ import vosk
 import os
 from dotenv import load_dotenv
 import time
+import json
 
 load_dotenv()
 
@@ -18,6 +19,8 @@ app = Flask(__name__)
 port = int(os.getenv('PORT', 3000))
 
 nltk.download('punkt')
+nltk.download('punkt_tab')
+nltk.download('averaged_perceptron_tagger')  # Adicione esta linha
 tokenizer = nltk.tokenize.word_tokenize
 stemmer = PorterStemmer()
 
@@ -29,7 +32,10 @@ FEEDBACK_THRESHOLDS = {
     'MEDIUM': 0.4
 }
 
-VOSK_MODEL_PATH = os.getenv('VOSK_MODEL_PATH', 'path/to/vosk/model')
+VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'vosk', 'models', 'vosk-model-small-en-us-0.15')
+
+if not os.path.exists(VOSK_MODEL_PATH):
+       raise FileNotFoundError(f"O modelo Vosk não foi encontrado em {VOSK_MODEL_PATH}")
 
 @app.route('/')
 def hello():
@@ -70,9 +76,35 @@ def transcribe():
         transcription_start = time.time()
         model = vosk.Model(VOSK_MODEL_PATH)
         rec = vosk.KaldiRecognizer(model, 16000)
-        rec.AcceptWaveform(out)
-        result = rec.FinalResult()
-        transcription = result['text']
+
+        audio_data = out
+        full_transcription = []
+        while True:
+            chunk = audio_data[:4000]
+            audio_data = audio_data[4000:]
+            if len(chunk) == 0:
+                break
+            if rec.AcceptWaveform(chunk):
+                partial_result = json.loads(rec.Result())
+                partial_text = partial_result.get('text', '')
+                if partial_text:
+                    full_transcription.append(partial_text)
+                    print(partial_text)
+
+        final_result = json.loads(rec.FinalResult())
+        final_text = final_result.get('text', '')
+        if final_text:
+            full_transcription.append(final_text)
+
+        transcription = ' '.join(full_transcription)
+
+        print(f'Transcrição completa: {transcription}')
+        print(f'Tamanho da transcrição: {len(transcription)} caracteres')
+
+        if not transcription.strip():  # Verifica se a transcrição está vazia ou contém apenas espaços em branco
+            print("Aviso: A transcrição está vazia. Resultado completo:", final_result)
+            raise ValueError("A transcrição está vazia")
+
         print(f'transcription: {time.time() - transcription_start:.3f}s')
 
         print('gerando perguntas...')
@@ -104,8 +136,8 @@ def answer():
 
 def generate_questions(text):
     try:
-        tokens = tokenizer(text.lower())
-        filtered_tokens = [token for token in tokens if token not in stopwords]
+        tokens = word_tokenize(text.lower())
+        filtered_tokens = [token for token in tokens if token.lower() not in stopwords]
 
         frequency = {}
         for token in filtered_tokens:
@@ -113,8 +145,15 @@ def generate_questions(text):
 
         keywords = sorted(frequency, key=frequency.get, reverse=True)[:5]
 
-        questions = [generate_question_for_keyword(keyword, text) for keyword in keywords]
-        return [q for q in questions if q is not None]
+        questions = []
+        for keyword in keywords:
+            question = generate_question_for_keyword(keyword, text)
+            if question:
+                questions.append(question)
+            if len(questions) >= 3:  # Limitar a 3 perguntas
+                break
+
+        return questions
     except Exception as e:
         print(f'Erro ao gerar perguntas: {str(e)}')
         return []
@@ -122,11 +161,11 @@ def generate_questions(text):
 def generate_question_for_keyword(keyword, context):
     try:
         generator = pipeline('text2text-generation', model='unicamp-dl/ptt5-base-portuguese-vocab')
-        prompt = f'Gere uma pergunta em português usando a palavra-chave "{keyword}" no seguinte contexto: "{context}"'
-        result = generator(prompt, max_length=50)
+        prompt = f'Gere uma pergunta em português usando a palavra-chave "{keyword}" no seguinte contexto: "{context[:500]}"'  # Limitando o contexto para evitar exceder o limite do modelo
+        result = generator(prompt, max_length=50, num_return_sequences=1)
         return result[0]['generated_text'].strip()
     except Exception as e:
-        print(f'Erro ao gerar pergunta: {str(e)}')
+        print(f'Erro ao gerar pergunta para a palavra-chave "{keyword}": {str(e)}')
         return None
 
 def evaluate_answer(question, user_answer, context):

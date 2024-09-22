@@ -6,3 +6,6 @@ scikit-learn
 transformers
 vosk
 python-dotenv
+tf-keras
+tensorflow
+transformers
