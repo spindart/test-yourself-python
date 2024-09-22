@@ -3,7 +3,7 @@ import yt_dlp
 import ffmpeg
 import io
 import nltk
-from nltk.tokenize import word_tokenize
+from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.stem import PorterStemmer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from transformers import pipeline
@@ -12,6 +12,7 @@ import os
 from dotenv import load_dotenv
 import time
 import json
+import random
 
 load_dotenv()
 
@@ -32,7 +33,7 @@ FEEDBACK_THRESHOLDS = {
     'MEDIUM': 0.4
 }
 
-VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'vosk', 'models', 'vosk-model-small-en-us-0.15')
+VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'vosk', 'models', 'vosk-model-en-us-0.42-gigaspeech')
 
 if not os.path.exists(VOSK_MODEL_PATH):
        raise FileNotFoundError(f"O modelo Vosk não foi encontrado em {VOSK_MODEL_PATH}")
@@ -136,24 +137,22 @@ def answer():
 
 def generate_questions(text):
     try:
-        tokens = word_tokenize(text.lower())
-        filtered_tokens = [token for token in tokens if token.lower() not in stopwords]
-
-        frequency = {}
-        for token in filtered_tokens:
-            frequency[token] = frequency.get(token, 0) + 1
-
-        keywords = sorted(frequency, key=frequency.get, reverse=True)[:5]
-
+        # Dividir o texto em sentenças
+        sentences = sent_tokenize(text)
+        
+        # Selecionar algumas sentenças aleatórias para gerar perguntas
+        selected_sentences = random.sample(sentences, min(5, len(sentences)))
+        
         questions = []
-        for keyword in keywords:
-            question = generate_question_for_keyword(keyword, text)
-            if question:
-                questions.append(question)
-            if len(questions) >= 3:  # Limitar a 3 perguntas
-                break
-
-        return questions
+        generator = pipeline('text2text-generation', model='t5-small')
+        
+        for sentence in selected_sentences:
+            prompt = f"Generate a question based on this information: '{sentence}'"
+            result = generator(prompt, max_length=100, num_return_sequences=1)
+            question = result[0]['generated_text'].strip()
+            questions.append({"question": question, "context": sentence})
+        
+        return questions[:3]  # Retornar apenas as 3 primeiras perguntas
     except Exception as e:
         print(f'Erro ao gerar perguntas: {str(e)}')
         return []
@@ -210,20 +209,20 @@ def generate_feedback(relevance_score, similarity_score, question, user_answer, 
 
 def generate_detailed_feedback(question, user_answer, context, overall_score):
     try:
-        generator = pipeline('text2text-generation', model='unicamp-dl/ptt5-base-portuguese-vocab')
+        generator = pipeline('text2text-generation', model='t5-small')
         prompt = f'''
-        Pergunta: "{question}"
-        Resposta do usuário: "{user_answer}"
-        Contexto: "{context}"
-        Pontuação geral: {overall_score:.2f}
+        Question: "{question}"
+        User's answer: "{user_answer}"
+        Context: "{context}"
+        Overall score: {overall_score:.2f}
         
-        Forneça um feedback detalhado e construtivo em português. Explique por que a resposta está correta, parcialmente correta ou incorreta. Sugira melhorias específicas e indique quais informações do contexto poderiam ter sido incluídas para uma resposta mais completa.
+        Provide detailed and constructive feedback. Explain why the answer is correct, partially correct, or incorrect. Suggest specific improvements and indicate what information from the context could have been included for a more complete answer.
         '''
         result = generator(prompt, max_length=200)
         return result[0]['generated_text'].strip()
     except Exception as e:
         print(f'Erro ao gerar feedback detalhado: {str(e)}')
-        return "Não foi possível gerar um feedback detalhado no momento."
+        return "Unable to generate detailed feedback at the moment."
 
 if __name__ == '__main__':
     app.run(port=port)
