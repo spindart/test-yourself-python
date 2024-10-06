@@ -84,9 +84,9 @@ def transcribe():
             raise ValueError("A transcrição está vazia")
 
         # Geração de perguntas
-        questions = generate_questions(transcription)
+        # questions = generate_questions(transcription)
         os.remove('audio.wav')
-        return jsonify({'transcription': transcription, 'questions': questions})
+        return jsonify({'transcription': transcription})
 
     except Exception as e:
         return jsonify({'error': 'Erro ao processar o vídeo', 'details': str(e)}), 500
